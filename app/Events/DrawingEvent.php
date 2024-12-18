@@ -8,6 +8,7 @@ use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 
 class DrawingEvent implements ShouldBroadcast
 {
@@ -20,7 +21,13 @@ class DrawingEvent implements ShouldBroadcast
         public string $type,
         public array $data,
         public ?string $userId = null
-    ) {}
+    ) {
+        Log::info('DrawingEvent created', [
+            'type' => $this->type,
+            'user_id' => $this->userId,
+            'data_size' => strlen(json_encode($this->data))
+        ]);
+    }
 
     /**
      * Get the channels the event should broadcast on.
@@ -29,6 +36,7 @@ class DrawingEvent implements ShouldBroadcast
      */
     public function broadcastOn(): array
     {
+        Log::info('Broadcasting on drawing channel');
         return [
             new PresenceChannel('drawing'),
         ];
@@ -41,10 +49,12 @@ class DrawingEvent implements ShouldBroadcast
      */
     public function broadcastWith(): array
     {
-        return [
+        $data = [
             'type' => $this->type,
             'data' => $this->data,
             'userId' => $this->userId,
         ];
+        Log::info('Broadcasting data', $data);
+        return $data;
     }
 }

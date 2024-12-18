@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Events\DrawingEvent;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 
 class DrawingController extends Controller
@@ -27,11 +28,17 @@ class DrawingController extends Controller
             'data' => 'required|array',
         ]);
 
+        Log::info('Broadcasting drawing event', [
+            'type' => $validated['type'],
+            'user_id' => auth()->id(),
+            'data_size' => strlen(json_encode($validated['data']))
+        ]);
+
         broadcast(new DrawingEvent(
             $validated['type'],
             $validated['data'],
             auth()->id()
-        ))->toOthers();
+        ));
 
         return response()->json(['status' => 'success']);
     }

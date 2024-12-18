@@ -11,6 +11,18 @@
         <link rel="preconnect" href="https://fonts.bunny.net">
         <link href="https://fonts.bunny.net/css?family=figtree:400,500,600&display=swap" rel="stylesheet" />
 
+        <!-- Pusher Configuration -->
+        <script>
+            window.Laravel = {!! json_encode([
+                'user' => auth()->user(),
+                'pusher' => [
+                    'key' => config('broadcasting.connections.pusher.key'),
+                    'cluster' => config('broadcasting.connections.pusher.options.cluster'),
+                ],
+                'csrfToken' => csrf_token(),
+            ]) !!};
+        </script>
+
         <!-- Scripts -->
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>

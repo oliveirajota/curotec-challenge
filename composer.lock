@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "c687cbaf595411c766533cdb244bc0f6",
+    "content-hash": "37847ff9c9f1562eb16c35c6b212a6d9",
     "packages": [
         {
             "name": "beyondcode/laravel-websockets",
@@ -6940,23 +6940,23 @@
         },
         {
             "name": "laravel/breeze",
-            "version": "v1.29.1",
+            "version": "v1.21.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/breeze.git",
-                "reference": "22c53b84b7fff91b01a318d71a10dfc251e92849"
+                "reference": "a7e7e2acfb2fd332183aae41c445be7a2329e93e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/breeze/zipball/22c53b84b7fff91b01a318d71a10dfc251e92849",
-                "reference": "22c53b84b7fff91b01a318d71a10dfc251e92849",
+                "url": "https://api.github.com/repos/laravel/breeze/zipball/a7e7e2acfb2fd332183aae41c445be7a2329e93e",
+                "reference": "a7e7e2acfb2fd332183aae41c445be7a2329e93e",
                 "shasum": ""
             },
             "require": {
-                "illuminate/console": "^10.17",
-                "illuminate/filesystem": "^10.17",
-                "illuminate/support": "^10.17",
-                "illuminate/validation": "^10.17",
+                "illuminate/console": "^10.0",
+                "illuminate/filesystem": "^10.0",
+                "illuminate/support": "^10.0",
+                "illuminate/validation": "^10.0",
                 "php": "^8.1.0"
             },
             "require-dev": {
@@ -6998,7 +6998,7 @@
                 "issues": "https://github.com/laravel/breeze/issues",
                 "source": "https://github.com/laravel/breeze"
             },
-            "time": "2024-03-04T14:35:21+00:00"
+            "time": "2023-05-04T15:02:53+00:00"
         },
         {
             "name": "laravel/pint",

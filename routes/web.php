@@ -33,4 +33,11 @@ Route::middleware('auth')->group(function () {
     Route::post('/drawing/broadcast', [DrawingController::class, 'broadcast'])->name('drawing.broadcast');
 });
 
+// WebSocket Dashboard (debug only)
+Route::group(['middleware' => ['auth']], function () {
+    Route::get('/laravel-websockets', function () {
+        return view('dashboard');
+    });
+});
+
 require __DIR__.'/auth.php';

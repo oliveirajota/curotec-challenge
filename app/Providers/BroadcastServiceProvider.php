@@ -12,8 +12,10 @@ class BroadcastServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        Broadcast::routes();
+        // Register routes for channel authorization
+        Broadcast::routes(['middleware' => ['web', 'auth']]);
 
+        // Register channels
         require base_path('routes/channels.php');
     }
 }
