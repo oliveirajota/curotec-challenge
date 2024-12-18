@@ -6,15 +6,19 @@
         <canvas ref="canvas" width="800" height="600"></canvas>
       </div>
       <div class="drawing-tools mt-4 space-x-2">
-        <div class="tool-group">
-          <button @click="setTool('brush')" class="px-4 py-2 bg-gray-200 rounded" :class="{ 'bg-blue-500 text-white': currentTool === 'brush' }">Brush</button>
-          <button @click="setTool('eraser')" class="px-4 py-2 bg-gray-200 rounded" :class="{ 'bg-blue-500 text-white': currentTool === 'eraser' }">Eraser</button>
+        <div class="flex space-x-4 mb-4">
+          <button @click="setTool('brush')" :class="{ 'bg-blue-500': tool === 'brush', 'bg-gray-200': tool !== 'brush' }" class="px-4 py-2 rounded">
+            Brush
+          </button>
+          <button @click="setTool('eraser')" :class="{ 'bg-blue-500': tool === 'eraser', 'bg-gray-200': tool !== 'eraser' }" class="px-4 py-2 rounded">
+            Eraser
+          </button>
         </div>
-        <div class="color-group">
-          <button @click="setColor('black')" class="w-8 h-8 rounded-full bg-black" :class="{ 'ring-2 ring-blue-500': currentColor === 'black' }"></button>
-          <button @click="setColor('red')" class="w-8 h-8 rounded-full bg-red-500" :class="{ 'ring-2 ring-blue-500': currentColor === 'red' }"></button>
-          <button @click="setColor('blue')" class="w-8 h-8 rounded-full bg-blue-500" :class="{ 'ring-2 ring-blue-500': currentColor === 'blue' }"></button>
-          <button @click="setColor('green')" class="w-8 h-8 rounded-full bg-green-500" :class="{ 'ring-2 ring-blue-500': currentColor === 'green' }"></button>
+        <div class="flex space-x-4 mb-4">
+          <button @click="setColor('#000000')" :class="{ 'ring-2 ring-blue-500': color === '#000000' }" class="w-8 h-8 bg-black rounded-full"></button>
+          <button @click="setColor('#FF0000')" :class="{ 'ring-2 ring-blue-500': color === '#FF0000' }" class="w-8 h-8 bg-red-500 rounded-full"></button>
+          <button @click="setColor('#0000FF')" :class="{ 'ring-2 ring-blue-500': color === '#0000FF' }" class="w-8 h-8 bg-blue-500 rounded-full"></button>
+          <button @click="setColor('#00FF00')" :class="{ 'ring-2 ring-blue-500': color === '#00FF00' }" class="w-8 h-8 bg-green-500 rounded-full"></button>
         </div>
         <div class="size-group inline-flex items-center space-x-2">
           <input type="range" min="1" max="20" v-model="brushSize" class="w-32" />
@@ -29,14 +33,6 @@
       <div class="mt-2 text-sm text-gray-600">
         Status: {{ status }}
       </div>
-      <div v-if="activeUsers.length > 0" class="mt-2">
-        <h3 class="text-sm font-semibold">Active Users:</h3>
-        <ul class="text-sm text-gray-600">
-          <li v-for="user in activeUsers" :key="user.id">
-            {{ user.name }} {{ user.id === currentUserId ? '(You)' : '' }}
-          </li>
-        </ul>
-      </div>
     </div>
   </div>
 </template>
@@ -49,26 +45,42 @@ export default {
   name: 'DrawingCanvas',
   data() {
     return {
-      status: 'Initializing...',
       canvas: null,
-      currentColor: 'black',
+      isDrawing: false,
+      color: '#000000',
       brushSize: 5,
-      activeUsers: [],
-      currentUserId: null,
-      echo: null,
-      receivedChunks: {},
-      currentTool: 'brush',
+      tool: 'brush',
       history: [],
       redoStack: [],
-      isUndoRedo: false
+      isUndoRedo: false,
+      status: '',
+      sessionId: Date.now().toString(), // Unique session ID for this drawing
+      userId: null, // User ID for this session
     }
   },
   mounted() {
-    this.status = 'Component mounted';
-    this.$nextTick(() => {
-      this.initCanvas();
-      this.initWebSocket();
-    });
+    // Get user ID from auth data
+    if (window.Laravel && window.Laravel.user) {
+      this.userId = window.Laravel.user.id;
+    }
+
+    this.initCanvas();
+    this.loadHistory();
+    
+    // Subscribe to the presence channel
+    window.Echo.join('drawing')
+      .here((users) => {
+        console.log('Users currently drawing:', users);
+      })
+      .joining((user) => {
+        console.log('User joined:', user);
+      })
+      .leaving((user) => {
+        console.log('User left:', user);
+      })
+      .listen('.drawing-event', (event) => {
+        this.handleDrawingEvent(event);
+      });
   },
   methods: {
     initCanvas() {
@@ -80,15 +92,22 @@ export default {
         });
 
         this.canvas.freeDrawingBrush.width = this.brushSize;
-        this.canvas.freeDrawingBrush.color = this.currentColor;
+        this.canvas.freeDrawingBrush.color = this.color;
 
-        this.canvas.on('path:created', (e) => {
-          if (!this.isUndoRedo) {
-            this.history.push(e.path);
-            this.redoStack = [];
-            this.broadcastDrawing(e.path);
+        // Listen for mouse:up event instead of path:created
+        this.canvas.on('mouse:up', () => {
+          if (this.canvas.isDrawingMode) {
+            const objects = this.canvas.getObjects();
+            const lastPath = objects[objects.length - 1];
+            
+            if (lastPath && !this.isUndoRedo) {
+              console.log('New path detected:', lastPath);
+              this.history.push(lastPath);
+              this.redoStack = [];
+              this.broadcastDrawing(lastPath);
+            }
+            this.isUndoRedo = false;
           }
-          this.isUndoRedo = false;
         });
 
         this.status = 'Canvas initialized';
@@ -97,286 +116,149 @@ export default {
         this.status = 'Error initializing canvas';
       }
     },
-    initWebSocket() {
-      window.Echo.join(`drawing`)
-        .here((users) => {
-          this.activeUsers = users;
-          this.currentUserId = window.Laravel.user.id;
-          this.status = `Connected with ${users.length} users`;
-        })
-        .joining((user) => {
-          this.activeUsers.push(user);
-          this.status = `${user.name} joined`;
-        })
-        .leaving((user) => {
-          this.activeUsers = this.activeUsers.filter(u => u.id !== user.id);
-          this.status = `${user.name} left`;
-        })
-        .error((error) => {
-          console.error('Presence channel error:', error);
-          this.status = 'Error connecting to presence channel';
-        })
-        .listen('DrawingEvent', (event) => {
-          this.handleDrawingEvent(event);
-        });
-    },
-    clearCanvas() {
-      this.canvas.clear();
-      this.broadcastClear();
-    },
-    setColor(color) {
-      this.currentColor = color;
-      if (this.canvas) {
-        this.canvas.freeDrawingBrush.color = color;
-      }
-    },
-    compressPath(path) {
-      if (!path || !Array.isArray(path)) return path;
-      
-      return path.map(point => {
-        if (!Array.isArray(point)) return point;
-        return [
-          point[0], // Keep the command (M, L, etc.)
-          Math.round(point[1] * 10) / 10, // Round x to 1 decimal
-          Math.round(point[2] * 10) / 10  // Round y to 1 decimal
-        ];
-      });
-    },
-    splitIntoChunks(pathData) {
-      const maxSize = 8000;
-      const chunks = [];
-      let pendingPoints = [...pathData.path];
-      
-      while (pendingPoints.length > 0) {
-        let currentChunk = {
-          ...pathData,
-          path: [],
-          isChunk: true,
-          chunkIndex: chunks.length
-        };
-
-        if (chunks.length === 0 || !chunks[chunks.length - 1].path.length) {
-          const firstPoint = pendingPoints[0];
-          currentChunk.path.push(['M', firstPoint[1], firstPoint[2]]);
-          pendingPoints.shift();
-        } else {
-          const lastChunk = chunks[chunks.length - 1];
-          const lastPoint = lastChunk.path[lastChunk.path.length - 1];
-          currentChunk.path.push(['M', lastPoint[1], lastPoint[2]]);
-        }
-
-        while (pendingPoints.length > 0) {
-          const point = pendingPoints[0];
-          const testChunk = {
-            ...currentChunk,
-            path: [...currentChunk.path, point]
-          };
-          
-          const chunkSize = new TextEncoder().encode(JSON.stringify(testChunk)).length;
-          if (chunkSize >= maxSize && currentChunk.path.length > 1) {
-            break;
-          }
-          
-          currentChunk.path.push(point);
-          pendingPoints.shift();
-        }
-
-        if (currentChunk.path.length > 0) {
-          chunks.push(currentChunk);
-        }
-      }
-
-      chunks.forEach((chunk, index) => {
-        chunk.totalChunks = chunks.length;
-        chunk.chunkIndex = index;
-        chunk.drawingId = `${Date.now()}-${index}`; // Add unique drawing ID
-      });
-
-      return chunks;
-    },
-    broadcastDrawing(obj) {
-      if (!obj || !obj.path) return;
-
-      const drawingData = {
-        type: obj.type,
-        path: obj.path,
-        left: Math.round(obj.left),
-        top: Math.round(obj.top),
-        width: Math.round(obj.width || 0),
-        height: Math.round(obj.height || 0),
-        stroke: obj.stroke,
-        strokeWidth: obj.strokeWidth
-      };
-
-      const dataSize = new TextEncoder().encode(JSON.stringify(drawingData)).length;
-      
-      if (dataSize > 8000) {
-        const chunks = this.splitIntoChunks(drawingData);
-        const drawingId = chunks[0].drawingId.split('-')[0];
-        
-        const sendChunks = async () => {
-          for (let i = 0; i < chunks.length; i++) {
-            try {
-              const chunk = chunks[i];
-              chunk.drawingId = `${drawingId}-${i}`; // Ensure consistent drawing ID
-              
-              await axios.post('/drawing/broadcast', {
-                type: 'path',
-                data: chunk
-              });
-            } catch (error) {
-              console.error(`Error sending chunk ${i + 1}:`, error);
-              break;
-            }
-          }
-        };
-        
-        sendChunks();
-      } else {
-        axios.post('/drawing/broadcast', {
-          type: 'path',
-          data: drawingData
-        }).catch(error => console.error('Error sending drawing:', error));
-      }
-    },
-    broadcastClear() {
+    async loadHistory() {
       try {
-        axios.post('/drawing/broadcast', {
-          type: 'clear',
-          data: {}
+        const response = await axios.get('/drawing/history', {
+          params: { session_id: this.sessionId }
         });
+        const steps = response.data.steps;
+        
+        // Apply each step to the canvas
+        for (const step of steps) {
+          this.applyStep(step);
+        }
       } catch (error) {
-        console.error('Error broadcasting clear:', error);
-        this.status = 'Error broadcasting clear';
+        console.error('Error loading history:', error);
       }
     },
-    broadcastAction(type, data) {
-      axios.post('/drawing/broadcast', {
-        type: type,
-        data: data
-      }).catch(error => {
-        console.error(`Error broadcasting ${type}:`, error);
-        this.status = `Error broadcasting ${type}`;
+    applyStep(step) {
+      const data = step.content;
+      if (!data || !data.path) return;
+
+      fabric.Path.fromObject(data.path, (path) => {
+        path.id = step.step;
+        this.canvas.add(path);
+        this.history.push(path);
+        this.canvas.renderAll();
       });
     },
-    handleDrawingEvent(event) {
-      if (!event.data) return;
-      
-      const data = event.data;
-      
-      if (data.type === 'undo') {
-        if (this.history.length > 0) {
-          const path = this.history.find(p => p.id === data.data.pathId);
-          if (path) {
-            this.history = this.history.filter(p => p.id !== data.data.pathId);
+    async broadcastDrawing(obj) {
+      try {
+        console.log('Broadcasting path:', obj);
+        const pathData = {
+          path: obj.path,
+          left: obj.left,
+          top: obj.top,
+          width: obj.width,
+          height: obj.height,
+          stroke: obj.stroke,
+          strokeWidth: obj.strokeWidth,
+          fill: false,
+          closed: false
+        };
+
+        const data = {
+          type: 'path',
+          data: pathData,
+          session_id: this.sessionId,
+          user_id: this.userId
+        };
+
+        console.log('Broadcasting data:', data);
+        const response = await axios.post('/drawing/broadcast', data);
+        console.log('Broadcast response:', response.data);
+        this.status = 'Drawing broadcasted';
+      } catch (error) {
+        console.error('Error broadcasting drawing:', error);
+        this.status = 'Error broadcasting drawing';
+      }
+    },
+    async undo() {
+      if (this.history.length > 0) {
+        const path = this.history[this.history.length - 1];
+        try {
+          const response = await axios.post('/drawing/undo', {
+            session_id: this.sessionId
+          });
+          
+          if (response.data.status === 'success') {
+            this.history.pop();
             this.redoStack.push(path);
             this.isUndoRedo = true;
             this.canvas.remove(path);
           }
+        } catch (error) {
+          console.error('Error during undo:', error);
         }
-        return;
-      }
-
-      if (data.type === 'redo') {
-        const path = this.redoStack.find(p => p.id === data.data.pathId);
-        if (path) {
-          this.redoStack = this.redoStack.filter(p => p.id !== data.data.pathId);
-          this.history.push(path);
-          this.isUndoRedo = true;
-          this.canvas.add(path);
-        }
-        return;
-      }
-
-      if (data.isChunk) {
-        const drawingId = data.drawingId.split('-')[0];
-        
-        if (!this.receivedChunks[drawingId]) {
-          this.receivedChunks[drawingId] = new Array(data.totalChunks).fill(null);
-        }
-        
-        this.receivedChunks[drawingId][data.chunkIndex] = data;
-        
-        const chunks = this.receivedChunks[drawingId];
-        
-        if (chunks.every(chunk => chunk !== null)) {
-          const completePath = chunks.reduce((acc, chunk, idx) => {
-            const chunkPath = chunk.path;
-            if (idx === 0) return chunkPath;
-            return chunkPath[0][0] === 'M' ? [...acc, ...chunkPath.slice(1)] : [...acc, ...chunkPath];
-          }, []);
-          
-          const completeObject = {
-            ...chunks[0],
-            path: completePath,
-            isChunk: false
-          };
-          
-          this.drawPath(completeObject);
-          delete this.receivedChunks[drawingId];
-        }
-      } else {
-        this.drawPath(data);
       }
     },
-    drawPath(data) {
-      const fullObject = {
-        ...data,
-        fill: null,
-        strokeLineCap: 'round',
-        strokeLineJoin: 'round',
-        strokeDashArray: null,
-        strokeDashOffset: 0,
-        strokeMiterLimit: 10,
-        scaleX: 1,
-        scaleY: 1,
-        angle: 0,
-        flipX: false,
-        flipY: false,
-        opacity: 1,
-        shadow: null,
-        visible: true,
-        backgroundColor: null,
-        fillRule: 'nonzero',
-        paintFirst: 'fill',
-        globalCompositeOperation: 'source-over',
-        skewX: 0,
-        skewY: 0,
-      };
+    async redo() {
+      if (this.redoStack.length > 0) {
+        const path = this.redoStack[this.redoStack.length - 1];
+        try {
+          const response = await axios.post('/drawing/redo', {
+            session_id: this.sessionId
+          });
+          
+          if (response.data.status === 'success') {
+            this.redoStack.pop();
+            this.history.push(path);
+            this.isUndoRedo = true;
+            this.canvas.add(path);
+          }
+        } catch (error) {
+          console.error('Error during redo:', error);
+        }
+      }
+    },
+    handleDrawingEvent(event) {
+      try {
+        if (event.userId === this.userId) return; // Skip our own events
+        
+        console.log('Received drawing event:', event);
+        const pathData = event.data;
 
-      if (data.type === 'path') {
-        const pathObject = new fabric.Path(data.path.map(point => point.join(' ')).join(' '), fullObject);
-        this.canvas.add(pathObject);
+        // Create a new path with the exact properties from the event
+        const newPath = new fabric.Path(pathData.path, {
+          left: pathData.left,
+          top: pathData.top,
+          width: pathData.width,
+          height: pathData.height,
+          stroke: pathData.stroke,
+          strokeWidth: pathData.strokeWidth,
+          fill: false,
+          closed: false,
+          selectable: false,
+          evented: false
+        });
+
+        console.log('Creating path from event:', newPath);
+        this.canvas.add(newPath);
         this.canvas.renderAll();
+        this.status = 'Drawing received';
+      } catch (error) {
+        console.error('Error handling drawing event:', error);
+        this.status = 'Error handling drawing event';
       }
     },
     setTool(tool) {
-      this.currentTool = tool;
+      this.tool = tool;
       if (tool === 'eraser') {
         this.canvas.freeDrawingBrush.color = '#ffffff';
         this.canvas.freeDrawingBrush.width = this.brushSize * 2;
       } else {
-        this.canvas.freeDrawingBrush.color = this.currentColor;
+        this.canvas.freeDrawingBrush.color = this.color;
         this.canvas.freeDrawingBrush.width = this.brushSize;
       }
     },
-    undo() {
-      if (this.canUndo) {
-        const path = this.history.pop();
-        this.redoStack.push(path);
-        this.isUndoRedo = true;
-        this.canvas.remove(path);
-        this.broadcastAction('undo', { pathId: path.id });
+    setColor(color) {
+      this.color = color;
+      if (this.canvas && this.tool !== 'eraser') {
+        this.canvas.freeDrawingBrush.color = color;
       }
     },
-    redo() {
-      if (this.canRedo) {
-        const path = this.redoStack.pop();
-        this.history.push(path);
-        this.isUndoRedo = true;
-        this.canvas.add(path);
-        this.broadcastAction('redo', { pathId: path.id });
-      }
+    clearCanvas() {
+      this.canvas.clear();
     }
   },
   computed: {

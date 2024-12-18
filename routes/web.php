@@ -31,6 +31,9 @@ Route::middleware('auth')->group(function () {
     // Drawing routes
     Route::get('/drawing', [DrawingController::class, 'index'])->name('drawing.index');
     Route::post('/drawing/broadcast', [DrawingController::class, 'broadcast'])->name('drawing.broadcast');
+    Route::post('/drawing/undo', [DrawingController::class, 'undo'])->name('drawing.undo');
+    Route::post('/drawing/redo', [DrawingController::class, 'redo'])->name('drawing.redo');
+    Route::get('/drawing/history', [DrawingController::class, 'getHistory'])->name('drawing.history');
 });
 
 // WebSocket Dashboard (debug only)

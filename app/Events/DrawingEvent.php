@@ -57,4 +57,12 @@ class DrawingEvent implements ShouldBroadcast
         Log::info('Broadcasting data', $data);
         return $data;
     }
+
+    /**
+     * Get the broadcast event name.
+     */
+    public function broadcastAs(): string
+    {
+        return 'drawing-event';
+    }
 }
