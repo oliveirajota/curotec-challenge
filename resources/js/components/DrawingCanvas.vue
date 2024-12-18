@@ -6,14 +6,25 @@
         <canvas ref="canvas" width="800" height="600"></canvas>
       </div>
       <div class="drawing-tools mt-4 space-x-2">
-        <button @click="clearCanvas" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">Clear</button>
-        <button @click="setColor('black')" class="w-8 h-8 rounded-full bg-black" :class="{ 'ring-2 ring-blue-500': currentColor === 'black' }"></button>
-        <button @click="setColor('red')" class="w-8 h-8 rounded-full bg-red-500" :class="{ 'ring-2 ring-blue-500': currentColor === 'red' }"></button>
-        <button @click="setColor('blue')" class="w-8 h-8 rounded-full bg-blue-500" :class="{ 'ring-2 ring-blue-500': currentColor === 'blue' }"></button>
-        <div class="inline-flex items-center space-x-2">
+        <div class="tool-group">
+          <button @click="setTool('brush')" class="px-4 py-2 bg-gray-200 rounded" :class="{ 'bg-blue-500 text-white': currentTool === 'brush' }">Brush</button>
+          <button @click="setTool('eraser')" class="px-4 py-2 bg-gray-200 rounded" :class="{ 'bg-blue-500 text-white': currentTool === 'eraser' }">Eraser</button>
+        </div>
+        <div class="color-group">
+          <button @click="setColor('black')" class="w-8 h-8 rounded-full bg-black" :class="{ 'ring-2 ring-blue-500': currentColor === 'black' }"></button>
+          <button @click="setColor('red')" class="w-8 h-8 rounded-full bg-red-500" :class="{ 'ring-2 ring-blue-500': currentColor === 'red' }"></button>
+          <button @click="setColor('blue')" class="w-8 h-8 rounded-full bg-blue-500" :class="{ 'ring-2 ring-blue-500': currentColor === 'blue' }"></button>
+          <button @click="setColor('green')" class="w-8 h-8 rounded-full bg-green-500" :class="{ 'ring-2 ring-blue-500': currentColor === 'green' }"></button>
+        </div>
+        <div class="size-group inline-flex items-center space-x-2">
           <input type="range" min="1" max="20" v-model="brushSize" class="w-32" />
           <span class="text-sm text-gray-600">Size: {{ brushSize }}</span>
         </div>
+        <div class="history-group">
+          <button @click="undo" class="px-4 py-2 bg-gray-200 rounded" :disabled="!canUndo">Undo</button>
+          <button @click="redo" class="px-4 py-2 bg-gray-200 rounded" :disabled="!canRedo">Redo</button>
+        </div>
+        <button @click="clearCanvas" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">Clear</button>
       </div>
       <div class="mt-2 text-sm text-gray-600">
         Status: {{ status }}
@@ -45,7 +56,11 @@ export default {
       activeUsers: [],
       currentUserId: null,
       echo: null,
-      receivedChunks: {}
+      receivedChunks: {},
+      currentTool: 'brush',
+      history: [],
+      redoStack: [],
+      isUndoRedo: false
     }
   },
   mounted() {
@@ -64,12 +79,16 @@ export default {
           height: 600
         });
 
-        this.canvas.freeDrawingBrush.color = this.currentColor;
         this.canvas.freeDrawingBrush.width = this.brushSize;
+        this.canvas.freeDrawingBrush.color = this.currentColor;
 
-        // Listen for path creation
         this.canvas.on('path:created', (e) => {
-          this.broadcastDrawing(e.path);
+          if (!this.isUndoRedo) {
+            this.history.push(e.path);
+            this.redoStack = [];
+            this.broadcastDrawing(e.path);
+          }
+          this.isUndoRedo = false;
         });
 
         this.status = 'Canvas initialized';
@@ -231,11 +250,44 @@ export default {
         this.status = 'Error broadcasting clear';
       }
     },
+    broadcastAction(type, data) {
+      axios.post('/drawing/broadcast', {
+        type: type,
+        data: data
+      }).catch(error => {
+        console.error(`Error broadcasting ${type}:`, error);
+        this.status = `Error broadcasting ${type}`;
+      });
+    },
     handleDrawingEvent(event) {
       if (!event.data) return;
       
       const data = event.data;
       
+      if (data.type === 'undo') {
+        if (this.history.length > 0) {
+          const path = this.history.find(p => p.id === data.data.pathId);
+          if (path) {
+            this.history = this.history.filter(p => p.id !== data.data.pathId);
+            this.redoStack.push(path);
+            this.isUndoRedo = true;
+            this.canvas.remove(path);
+          }
+        }
+        return;
+      }
+
+      if (data.type === 'redo') {
+        const path = this.redoStack.find(p => p.id === data.data.pathId);
+        if (path) {
+          this.redoStack = this.redoStack.filter(p => p.id !== data.data.pathId);
+          this.history.push(path);
+          this.isUndoRedo = true;
+          this.canvas.add(path);
+        }
+        return;
+      }
+
       if (data.isChunk) {
         const drawingId = data.drawingId.split('-')[0];
         
@@ -297,6 +349,42 @@ export default {
         this.canvas.add(pathObject);
         this.canvas.renderAll();
       }
+    },
+    setTool(tool) {
+      this.currentTool = tool;
+      if (tool === 'eraser') {
+        this.canvas.freeDrawingBrush.color = '#ffffff';
+        this.canvas.freeDrawingBrush.width = this.brushSize * 2;
+      } else {
+        this.canvas.freeDrawingBrush.color = this.currentColor;
+        this.canvas.freeDrawingBrush.width = this.brushSize;
+      }
+    },
+    undo() {
+      if (this.canUndo) {
+        const path = this.history.pop();
+        this.redoStack.push(path);
+        this.isUndoRedo = true;
+        this.canvas.remove(path);
+        this.broadcastAction('undo', { pathId: path.id });
+      }
+    },
+    redo() {
+      if (this.canRedo) {
+        const path = this.redoStack.pop();
+        this.history.push(path);
+        this.isUndoRedo = true;
+        this.canvas.add(path);
+        this.broadcastAction('redo', { pathId: path.id });
+      }
+    }
+  },
+  computed: {
+    canUndo() {
+      return this.history.length > 0;
+    },
+    canRedo() {
+      return this.redoStack.length > 0;
     }
   },
   watch: {
