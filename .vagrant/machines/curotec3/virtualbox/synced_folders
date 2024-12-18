@@ -1,0 +1,1 @@
+{"virtualbox":{"/home/vagrant/curotec3":{"type":null,"mount_options":["uid=1000","gid=1000","_netdev"],"guestpath":"/home/vagrant/curotec3","hostpath":"E:/Dev/assessments/curotec3","disabled":false,"__vagrantfile":true},"/vagrant":{"guestpath":"/vagrant","hostpath":"E:/Dev/assessments/curotec3","disabled":false,"__vagrantfile":true}}}
