@@ -44,7 +44,8 @@ export default {
       brushSize: 5,
       activeUsers: [],
       currentUserId: null,
-      echo: null
+      echo: null,
+      receivedChunks: {}
     }
   },
   mounted() {
@@ -130,56 +131,62 @@ export default {
       });
     },
     splitIntoChunks(pathData) {
-      const maxSize = 8000; // Leave buffer for other data
+      const maxSize = 8000;
       const chunks = [];
-      let currentChunk = null;
       let pendingPoints = [...pathData.path];
       
-      const createChunk = (points) => ({
-        ...pathData,
-        path: points,
-        isChunk: true,
-        chunkIndex: chunks.length
-      });
-
+      console.log('Starting to split path with', pendingPoints.length, 'points');
+      
       while (pendingPoints.length > 0) {
-        if (!currentChunk) {
-          currentChunk = createChunk([]);
-        }
+        let currentChunk = {
+          ...pathData,
+          path: [],
+          isChunk: true,
+          chunkIndex: chunks.length
+        };
 
-        // Always include the first point of a new chunk
-        if (currentChunk.path.length === 0) {
+        // For first chunk or if no previous chunk exists, use the first point as is
+        if (chunks.length === 0 || !chunks[chunks.length - 1].path.length) {
           const firstPoint = pendingPoints[0];
           currentChunk.path.push(['M', firstPoint[1], firstPoint[2]]);
           pendingPoints.shift();
-          continue;
-        }
-
-        // Try adding next point
-        const nextPoint = pendingPoints[0];
-        const testChunk = createChunk([...currentChunk.path, nextPoint]);
-        const chunkSize = new TextEncoder().encode(JSON.stringify(testChunk)).length;
-
-        if (chunkSize < maxSize) {
-          currentChunk.path.push(nextPoint);
-          pendingPoints.shift();
         } else {
-          // Current chunk is full, start a new one
+          // Continue from last point of previous chunk
+          const lastChunk = chunks[chunks.length - 1];
+          const lastPoint = lastChunk.path[lastChunk.path.length - 1];
+          currentChunk.path.push(['M', lastPoint[1], lastPoint[2]]);
+        }
+
+        while (pendingPoints.length > 0) {
+          const point = pendingPoints[0];
+          const testChunk = {
+            ...currentChunk,
+            path: [...currentChunk.path, point]
+          };
+          
+          const chunkSize = new TextEncoder().encode(JSON.stringify(testChunk)).length;
+          if (chunkSize >= maxSize && currentChunk.path.length > 1) {
+            console.log(`Chunk ${chunks.length} full at ${chunkSize} bytes with ${currentChunk.path.length} points`);
+            break;
+          }
+          
+          currentChunk.path.push(point);
+          pendingPoints.shift();
+        }
+
+        if (currentChunk.path.length > 0) {
           chunks.push(currentChunk);
-          currentChunk = null;
+          console.log(`Created chunk ${chunks.length} with ${currentChunk.path.length} points`);
         }
       }
 
-      // Add the last chunk if it has points
-      if (currentChunk && currentChunk.path.length > 0) {
-        chunks.push(currentChunk);
-      }
-
-      // Update total chunks count
-      chunks.forEach(chunk => {
+      chunks.forEach((chunk, index) => {
         chunk.totalChunks = chunks.length;
+        chunk.chunkIndex = index;
+        chunk.drawingId = `${Date.now()}-${index}`; // Add unique drawing ID
       });
 
+      console.log(`Split into ${chunks.length} chunks`);
       return chunks;
     },
     broadcastDrawing(obj) {
@@ -196,34 +203,40 @@ export default {
         strokeWidth: obj.strokeWidth
       };
 
-      // Check if we need to split the data
       const dataSize = new TextEncoder().encode(JSON.stringify(drawingData)).length;
+      console.log('Drawing data size:', dataSize, 'bytes');
+      
       if (dataSize > 8000) {
         const chunks = this.splitIntoChunks(drawingData);
-        chunks.forEach((chunk, index) => {
-          axios.post('/drawing/broadcast', {
-            type: 'path',
-            data: chunk
-          })
-          .then(() => {
-            console.log(`Chunk ${index + 1}/${chunks.length} sent`);
-          })
-          .catch(error => {
-            console.error(`Error sending chunk ${index + 1}:`, error);
-          });
-        });
+        const drawingId = chunks[0].drawingId.split('-')[0];
+        
+        // Send chunks sequentially
+        const sendChunks = async () => {
+          for (let i = 0; i < chunks.length; i++) {
+            try {
+              const chunk = chunks[i];
+              chunk.drawingId = `${drawingId}-${i}`; // Ensure consistent drawing ID
+              
+              await axios.post('/drawing/broadcast', {
+                type: 'path',
+                data: chunk
+              });
+              console.log(`Chunk ${i + 1}/${chunks.length} sent, ID: ${chunk.drawingId}`);
+            } catch (error) {
+              console.error(`Error sending chunk ${i + 1}:`, error);
+              break;
+            }
+          }
+        };
+        
+        sendChunks();
       } else {
-        // Small enough to send as is
         axios.post('/drawing/broadcast', {
           type: 'path',
           data: drawingData
         })
-        .then(() => {
-          console.log('Drawing sent successfully');
-        })
-        .catch(error => {
-          console.error('Error sending drawing:', error);
-        });
+        .then(() => console.log('Drawing sent successfully'))
+        .catch(error => console.error('Error sending drawing:', error));
       }
     },
     broadcastClear() {
@@ -242,8 +255,53 @@ export default {
     handleDrawingEvent(event) {
       if (!event.data) return;
       
+      const data = event.data;
+      console.log('Received drawing event:', data.isChunk ? 'chunk' : 'complete drawing');
+      
+      if (data.isChunk) {
+        const drawingId = data.drawingId.split('-')[0];
+        console.log(`Processing chunk ${data.chunkIndex + 1}/${data.totalChunks} for drawing ${drawingId}`);
+        
+        if (!this.receivedChunks[drawingId]) {
+          console.log(`Creating new chunk array for drawing ${drawingId}`);
+          this.receivedChunks[drawingId] = new Array(data.totalChunks).fill(null);
+        }
+        
+        this.receivedChunks[drawingId][data.chunkIndex] = data;
+        
+        const chunks = this.receivedChunks[drawingId];
+        const receivedCount = chunks.filter(c => c !== null).length;
+        console.log(`Have ${receivedCount}/${data.totalChunks} chunks for drawing ${drawingId}`);
+        
+        if (chunks.every(chunk => chunk !== null)) {
+          console.log(`All chunks received for drawing ${drawingId}, combining...`);
+          
+          const completePath = chunks.reduce((acc, chunk, idx) => {
+            const chunkPath = chunk.path;
+            if (idx === 0) return chunkPath;
+            // Only skip the 'M' command if it's continuing from previous chunk
+            return chunkPath[0][0] === 'M' ? [...acc, ...chunkPath.slice(1)] : [...acc, ...chunkPath];
+          }, []);
+          
+          const completeObject = {
+            ...chunks[0],
+            path: completePath,
+            isChunk: false
+          };
+          
+          console.log(`Drawing complete path with ${completePath.length} points`);
+          this.drawPath(completeObject);
+          
+          delete this.receivedChunks[drawingId];
+        }
+      } else {
+        console.log('Drawing complete path directly');
+        this.drawPath(data);
+      }
+    },
+    drawPath(data) {
       const fullObject = {
-        ...event.data,
+        ...data,
         fill: null,
         strokeLineCap: 'round',
         strokeLineJoin: 'round',
@@ -266,8 +324,8 @@ export default {
         skewY: 0,
       };
 
-      if (event.data.type === 'path') {
-        const pathObject = new fabric.Path(event.data.path.map(point => point.join(' ')).join(' '), fullObject);
+      if (data.type === 'path') {
+        const pathObject = new fabric.Path(data.path.map(point => point.join(' ')).join(' '), fullObject);
         this.canvas.add(pathObject);
         this.canvas.renderAll();
       }
