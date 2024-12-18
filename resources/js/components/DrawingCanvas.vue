@@ -49,7 +49,6 @@ export default {
     }
   },
   mounted() {
-    console.log('DrawingCanvas component mounted');
     this.status = 'Component mounted';
     this.$nextTick(() => {
       this.initCanvas();
@@ -59,7 +58,6 @@ export default {
   methods: {
     initCanvas() {
       try {
-        console.log('Initializing Fabric canvas');
         this.canvas = new fabric.Canvas(this.$refs.canvas, {
           isDrawingMode: true,
           width: 800,
@@ -81,21 +79,17 @@ export default {
       }
     },
     initWebSocket() {
-      console.log('Initializing WebSocket connection');
       window.Echo.join(`drawing`)
         .here((users) => {
-          console.log('Users currently in channel:', users);
           this.activeUsers = users;
           this.currentUserId = window.Laravel.user.id;
           this.status = `Connected with ${users.length} users`;
         })
         .joining((user) => {
-          console.log('User joining:', user);
           this.activeUsers.push(user);
           this.status = `${user.name} joined`;
         })
         .leaving((user) => {
-          console.log('User leaving:', user);
           this.activeUsers = this.activeUsers.filter(u => u.id !== user.id);
           this.status = `${user.name} left`;
         })
@@ -104,7 +98,6 @@ export default {
           this.status = 'Error connecting to presence channel';
         })
         .listen('DrawingEvent', (event) => {
-          console.log('Received drawing event:', event);
           this.handleDrawingEvent(event);
         });
     },
@@ -135,8 +128,6 @@ export default {
       const chunks = [];
       let pendingPoints = [...pathData.path];
       
-      console.log('Starting to split path with', pendingPoints.length, 'points');
-      
       while (pendingPoints.length > 0) {
         let currentChunk = {
           ...pathData,
@@ -145,13 +136,11 @@ export default {
           chunkIndex: chunks.length
         };
 
-        // For first chunk or if no previous chunk exists, use the first point as is
         if (chunks.length === 0 || !chunks[chunks.length - 1].path.length) {
           const firstPoint = pendingPoints[0];
           currentChunk.path.push(['M', firstPoint[1], firstPoint[2]]);
           pendingPoints.shift();
         } else {
-          // Continue from last point of previous chunk
           const lastChunk = chunks[chunks.length - 1];
           const lastPoint = lastChunk.path[lastChunk.path.length - 1];
           currentChunk.path.push(['M', lastPoint[1], lastPoint[2]]);
@@ -166,7 +155,6 @@ export default {
           
           const chunkSize = new TextEncoder().encode(JSON.stringify(testChunk)).length;
           if (chunkSize >= maxSize && currentChunk.path.length > 1) {
-            console.log(`Chunk ${chunks.length} full at ${chunkSize} bytes with ${currentChunk.path.length} points`);
             break;
           }
           
@@ -176,7 +164,6 @@ export default {
 
         if (currentChunk.path.length > 0) {
           chunks.push(currentChunk);
-          console.log(`Created chunk ${chunks.length} with ${currentChunk.path.length} points`);
         }
       }
 
@@ -186,7 +173,6 @@ export default {
         chunk.drawingId = `${Date.now()}-${index}`; // Add unique drawing ID
       });
 
-      console.log(`Split into ${chunks.length} chunks`);
       return chunks;
     },
     broadcastDrawing(obj) {
@@ -204,13 +190,11 @@ export default {
       };
 
       const dataSize = new TextEncoder().encode(JSON.stringify(drawingData)).length;
-      console.log('Drawing data size:', dataSize, 'bytes');
       
       if (dataSize > 8000) {
         const chunks = this.splitIntoChunks(drawingData);
         const drawingId = chunks[0].drawingId.split('-')[0];
         
-        // Send chunks sequentially
         const sendChunks = async () => {
           for (let i = 0; i < chunks.length; i++) {
             try {
@@ -221,7 +205,6 @@ export default {
                 type: 'path',
                 data: chunk
               });
-              console.log(`Chunk ${i + 1}/${chunks.length} sent, ID: ${chunk.drawingId}`);
             } catch (error) {
               console.error(`Error sending chunk ${i + 1}:`, error);
               break;
@@ -234,19 +217,15 @@ export default {
         axios.post('/drawing/broadcast', {
           type: 'path',
           data: drawingData
-        })
-        .then(() => console.log('Drawing sent successfully'))
-        .catch(error => console.error('Error sending drawing:', error));
+        }).catch(error => console.error('Error sending drawing:', error));
       }
     },
     broadcastClear() {
       try {
-        console.log('Broadcasting clear command');
         axios.post('/drawing/broadcast', {
           type: 'clear',
           data: {}
         });
-        console.log('Clear broadcast successful');
       } catch (error) {
         console.error('Error broadcasting clear:', error);
         this.status = 'Error broadcasting clear';
@@ -256,30 +235,22 @@ export default {
       if (!event.data) return;
       
       const data = event.data;
-      console.log('Received drawing event:', data.isChunk ? 'chunk' : 'complete drawing');
       
       if (data.isChunk) {
         const drawingId = data.drawingId.split('-')[0];
-        console.log(`Processing chunk ${data.chunkIndex + 1}/${data.totalChunks} for drawing ${drawingId}`);
         
         if (!this.receivedChunks[drawingId]) {
-          console.log(`Creating new chunk array for drawing ${drawingId}`);
           this.receivedChunks[drawingId] = new Array(data.totalChunks).fill(null);
         }
         
         this.receivedChunks[drawingId][data.chunkIndex] = data;
         
         const chunks = this.receivedChunks[drawingId];
-        const receivedCount = chunks.filter(c => c !== null).length;
-        console.log(`Have ${receivedCount}/${data.totalChunks} chunks for drawing ${drawingId}`);
         
         if (chunks.every(chunk => chunk !== null)) {
-          console.log(`All chunks received for drawing ${drawingId}, combining...`);
-          
           const completePath = chunks.reduce((acc, chunk, idx) => {
             const chunkPath = chunk.path;
             if (idx === 0) return chunkPath;
-            // Only skip the 'M' command if it's continuing from previous chunk
             return chunkPath[0][0] === 'M' ? [...acc, ...chunkPath.slice(1)] : [...acc, ...chunkPath];
           }, []);
           
@@ -289,13 +260,10 @@ export default {
             isChunk: false
           };
           
-          console.log(`Drawing complete path with ${completePath.length} points`);
           this.drawPath(completeObject);
-          
           delete this.receivedChunks[drawingId];
         }
       } else {
-        console.log('Drawing complete path directly');
         this.drawPath(data);
       }
     },

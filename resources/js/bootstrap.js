@@ -19,9 +19,6 @@ window.axios.defaults.headers.common['X-CSRF-TOKEN'] = document.querySelector('m
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
 
-// Enable Pusher debug logging
-Pusher.logToConsole = true;
-
 window.Pusher = Pusher;
 
 window.Echo = new Echo({
